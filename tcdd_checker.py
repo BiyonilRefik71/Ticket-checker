@@ -1,40 +1,46 @@
 import requests
-import json
 from datetime import datetime
 
 # ══════════════════════════════════════════
-#  AYARLAR — sadece burayı düzenle
+#  AYARLAR
 # ══════════════════════════════════════════
-NTFY_TOPIC = "tcdd-bildirim-taylan"   # ntfy'da abone olduğun kanal adı
-MIN_SAAT   = 14                        # saat 14'ten sonraki trenler
-TARIH      = "2026-04-30"
-BINIS      = "İstanbul(Söğütlüçeşme)"
-INIS       = "Ankara Gar"
+NTFY_TOPIC = "tcdd-bildirim-taylan"
+MIN_SAAT   = 14
+TARIH      = "30-04-2026"
 # ══════════════════════════════════════════
 
-HEADERS = {
-    "Content-Type": "application/json",
-    "Authorization": "Basic dGNkZDpkZW1pcnlvbHU="
-}
+BASE = "https://web-api-prod-ytp.tcddtasimacilik.gov.tr"
+CDN  = "https://cdn-api-prod-ytp.tcddtasimacilik.gov.tr"
 
-def istasyon_id_al(ad):
-    url = "https://api-ytp.tcddtasimacilik.gov.tr/sacip/api/station/getall"
-    r = requests.get(url, headers=HEADERS, timeout=15)
-    for s in r.json():
-        if s.get("stationName", "").strip() == ad.strip():
-            return s["stationId"]
-    raise ValueError(f"İstasyon bulunamadı: {ad}")
+def token_al():
+    # TCDD'nin wsm endpoint'inden token alıyoruz
+    url = f"{BASE}/tms/auth/login"
+    payload = {"username": "web", "password": ""}
+    try:
+        r = requests.post(url, json=payload, timeout=15)
+        return r.json().get("access_token", "")
+    except:
+        return ""
 
-def seferleri_getir(binis_id, inis_id, tarih):
-    url = "https://api-ytp.tcddtasimacilik.gov.tr/sacip/api/journey/search"
-    payload = {
-        "departureStationId": binis_id,
-        "arrivalStationId": inis_id,
-        "departureDate": tarih + "T00:00:00",
-        "passengerCount": 1,
-        "isPromoApplied": False
+def seferleri_getir(token):
+    url = f"{BASE}/tms/train/train-availability?environment=dev&userId=1"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}"
     }
-    r = requests.post(url, headers=HEADERS, json=payload, timeout=20)
+    payload = {
+        "searchRoutes": [{
+            "departureStationId": 1325,
+            "departureStationName": "İSTANBUL(SÖĞÜTLÜÇEŞME)",
+            "arrivalStationId": 98,
+            "arrivalStationName": "ANKARA GAR",
+            "departureDate": f"{TARIH} 00:00:00"
+        }],
+        "passengerTypeCounts": [{"id": 0, "count": 1}],
+        "searchReservation": False,
+        "blTrainTypes": []
+    }
+    r = requests.post(url, headers=headers, json=payload, timeout=20)
     return r.json()
 
 def ntfy_gonder(mesaj, baslik):
@@ -46,40 +52,44 @@ def ntfy_gonder(mesaj, baslik):
 
 def kontrol_et():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Kontrol ediliyor...")
-    
+
+    token = token_al()
+    if not token:
+        print("Token alınamadı, yeniden deneniyor...")
+        # Token alınamazsa eski yöntemle devam et
+        token = "dummy"
+
     try:
-        binis_id = istasyon_id_al(BINIS)
-        inis_id  = istasyon_id_al(INIS)
-        data     = seferleri_getir(binis_id, inis_id, TARIH)
+        data = seferleri_getir(token)
     except Exception as e:
         print(f"HATA: {e}")
         return
 
-    bulunanlar = []
+    print("API yanıtı:", str(data)[:300])
 
-    for sefer in data.get("journeyList", []):
-        kalkis_str = sefer.get("departureTime", "")
+    bulunanlar = []
+    for sefer in data.get("trainAvailabilities", []):
+        kalkis_str = sefer.get("departureDate", "")
         try:
-            kalkis_saat = int(kalkis_str[11:13])  # "2026-04-30T14:30:00" → 14
+            saat = int(kalkis_str[9:11])
         except:
             continue
 
-        if kalkis_saat < MIN_SAAT:
+        if saat < MIN_SAAT:
             continue
 
-        for vagon in sefer.get("wagons", []):
-            tur = vagon.get("wagonType", "").lower()
+        for vagon in sefer.get("wagonAvailabilities", []):
+            tur = vagon.get("wagonTypeName", "").lower()
             bos = vagon.get("availableSeatCount", 0)
-
-            if bos > 0 and ("ekonomi" in tur or "business" in tur or "ekonomik" in tur):
+            if bos > 0 and ("ekonomi" in tur or "business" in tur):
                 bulunanlar.append(
-                    f"🚆 {kalkis_str[11:16]} — {vagon.get('wagonTypeName','?')} — {bos} koltuk boş"
+                    f"🚆 {kalkis_str[9:14]} — {vagon.get('wagonTypeName','?')} — {bos} koltuk"
                 )
 
     if bulunanlar:
         mesaj = "\n".join(bulunanlar)
         print("BULUNDU:\n" + mesaj)
-        ntfy_gonder(mesaj, f"TCDD {TARIH} — Yer Var!")
+        ntfy_gonder(mesaj, f"TCDD 30 Nisan — Yer Var!")
     else:
         print("Uygun yer yok.")
 
