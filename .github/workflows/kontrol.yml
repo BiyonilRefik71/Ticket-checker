@@ -2,7 +2,7 @@ name: TCDD Kontrol
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # her 15 dakikada bir
+    - cron: '*/5 * * * *'   # her 15 dakikada bir
   workflow_dispatch:           # elle de çalıştırabilirsin
 
 jobs:
