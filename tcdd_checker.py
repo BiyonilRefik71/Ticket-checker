@@ -26,7 +26,9 @@ def seferleri_getir():
         "searchReservation": False,
         "blTrainTypes": []
     }
-    r = requests.post(url, headers=headers, json=payload, timeout=20)
+    r = requests.post(url, headers=headers, json=payload, timeout=60)
+    print(f"HTTP Status: {r.status_code}")
+    print(f"Yanıt: {r.text[:300]}")
     return r.json()
 
 def ntfy_gonder(mesaj, baslik):
@@ -48,23 +50,20 @@ def kontrol_et():
     for leg in data.get("trainLegs", []):
         for availability in leg.get("trainAvailabilities", []):
             for train in availability.get("trains", []):
-                # Kalkış saatini segment'ten al
                 segments = train.get("segments", [])
                 if not segments:
                     continue
                 kalkis_ms = segments[0].get("departureTime", 0)
                 kalkis_dt = datetime.fromtimestamp(kalkis_ms / 1000)
-                
+
                 if kalkis_dt.hour < MIN_SAAT:
                     continue
 
-                # Koltuk kapasitelerini kontrol et
-                # bookingClassId: 1=Ekonomi, 4=Business
                 for koltuk in train.get("bookingClassCapacities", []):
                     sinif_id = koltuk.get("bookingClassId")
                     kapasite = koltuk.get("capacity", 0)
                     sinif_adi = "Ekonomi" if sinif_id == 1 else "Business" if sinif_id == 4 else None
-                    
+
                     if sinif_adi and kapasite > 0:
                         bulunanlar.append(
                             f"🚆 {kalkis_dt.strftime('%H:%M')} — {train.get('name','?')} — {sinif_adi} — {kapasite} koltuk"
